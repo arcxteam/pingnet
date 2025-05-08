@@ -1,0 +1,12 @@
+[
+    {
+        "Email": "email_1",
+        "UserId": "user_1",
+        "DeviceId": "device_1"
+    },
+    {
+        "Email": "email_2",
+        "UserId": "user_2",
+        "DeviceId": "device_2"
+    }
+]

@@ -61,7 +61,7 @@ class PingVPN:
             logger.warning(log_message)
 
     def welcome(self):
-        """Menampilkan banner kustom untuk PingVPN."""
+        """banner BANG."""
         banner = f"""
     {Fore.GREEN}========================  WELCOME TO INTERACTIVE TESTNET ========================{Style.RESET_ALL}
     {Fore.YELLOW}

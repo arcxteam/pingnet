@@ -50,6 +50,7 @@ class PingVPN:
         os.system('cls' if os.name == 'nt' else 'clear')
 
     def log(self, message, level="info"):
+        """Mencatat pesan dengan warna dan level yang sesuai."""
         timestamp = datetime.now().astimezone(wib).strftime('%x %X %Z')
         color = Fore.GREEN if level == "info" else Fore.RED if level == "error" else Fore.YELLOW
         log_message = f"[ {timestamp} ] | {color}{message}{Style.RESET_ALL}"
@@ -61,24 +62,24 @@ class PingVPN:
             logger.warning(log_message)
 
     def welcome(self):
-        """banner BANG."""
+        """banner bang."""
         banner = f"""
-    {Fore.GREEN}========================  WELCOME TO INTERACTIVE TESTNET ========================{Style.RESET_ALL}
-    {Fore.YELLOW}
-     ██████╗██╗   ██╗ █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ██████╗ ███████╗
-    ██╔════╝██║   ██║██╔══██╗████╗  ██║████╗  ██║██╔═══██╗██╔══██╗██╔════╝
-    ██║     ██║   ██║███████║██╔██╗ ██║██╔██╗ ██║██║   ██║██║  ██║█████╗  
-    ██║     ██║   ██║██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  
-    ╚██████╗╚██████╔╝██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝██████╔╝███████╗
-     ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝
-    {Style.RESET_ALL}
-    {Fore.CYAN}======================================================================={Style.RESET_ALL}
-    {Fore.MAGENTA}       Welcome to Onchain Testnet & Mainnet Interactive          {Style.RESET_ALL}
-    {Fore.YELLOW}        - CUANNODE By Greyscope&Co, Credit By Arcxteam -          {Style.RESET_ALL}
-    {Fore.CYAN}======================================================================={Style.RESET_ALL}
-    """
+{Fore.CYAN}======================== WELCOME TO INTERACTIVE TESTNET ========================{Style.RESET_ALL}
+{Fore.YELLOW}
+ ██████╗██╗   ██╗ █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ██████╗ ███████╗
+██╔════╝██║   ██║██╔══██╗████╗  ██║████╗  ██║██╔═══██╗██╔══██╗██╔════╝
+██║     ██║   ██║███████║██╔██╗ ██║██╔██╗ ██║██║   ██║██║  ██║█████╗  
+██║     ██║   ██║██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  
+╚██████╗╚██████╔╝██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝██████╔╝███████╗
+ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝
+{Style.RESET_ALL}
+{Fore.CYAN}======================================================================={Style.RESET_ALL}
+{Fore.MAGENTA}       Welcome to Onchain Testnet & Mainnet Interactive        {Style.RESET_ALL}
+{Fore.YELLOW}        - CUANNODE By Greyscope&Co, Credit By Arcxteam -          {Style.RESET_ALL}
+{Fore.CYAN}======================================================================={Style.RESET_ALL}
+"""
         self.log(banner, level="info")
-    
+
     def format_seconds(self, seconds):
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -112,46 +113,91 @@ class PingVPN:
                 self.log(f"File {filename} tidak ditemukan.", level="error")
                 return
             with open(filename, 'r') as f:
-                self.proxies = [line.strip() for line in f if line.strip()]
+                proxies = [line.strip() for line in f if line.strip()]
             
-            if not self.proxies:
+            if not proxies:
                 self.log(f"Tidak ada proxy yang ditemukan di {filename}.", level="error")
                 return
 
-            # Validasi proxy
+            # Validasi dan uji proxy
             valid_proxies = []
-            for proxy in self.proxies:
-                if await self.test_proxy(proxy):
-                    valid_proxies.append(proxy)
+            for proxy in proxies:
+                formatted_proxy = self.check_proxy_schemes(proxy)
+                if formatted_proxy:
+                    if await self.test_proxy(formatted_proxy):
+                        valid_proxies.append(formatted_proxy)
+                        self.log(f"Proxy valid: {formatted_proxy}", level="info")
+                    else:
+                        self.log(f"Proxy tidak berfungsi: {proxy}", level="warning")
                 else:
-                    self.log(f"Proxy tidak valid: {proxy}", level="warning")
+                    self.log(f"Format proxy tidak valid: {proxy}", level="warning")
             self.proxies = valid_proxies
 
             self.log(
-                f"Total Proxy: {len(self.proxies)}",
+                f"Total Proxy Valid: {len(self.proxies)}",
                 level="info"
             )
+            if not valid_proxies:
+                self.log("Tidak ada proxy valid. Akan menggunakan jaringan lokal.", level="warning")
         except Exception as e:
             self.log(f"Gagal memuat proxy: {e}", level="error")
             self.proxies = []
 
     async def test_proxy(self, proxy):
         """Menguji apakah proxy berfungsi."""
+        if not proxy:
+            self.log("Proxy tidak valid untuk pengujian.", level="error")
+            return False
         test_url = "https://www.google.com"
-        connector = ProxyConnector.from_url(self.check_proxy_schemes(proxy))
         try:
+            connector = ProxyConnector.from_url(proxy)
             async with ClientSession(connector=connector, timeout=ClientTimeout(total=10)) as session:
                 async with session.get(test_url) as response:
                     response.raise_for_status()
                     return True
-        except Exception:
+        except Exception as e:
+            self.log(f"Pengujian proxy gagal untuk {proxy}: {e}", level="warning")
             return False
 
     def check_proxy_schemes(self, proxy):
+        """Memvalidasi dan menormalkan format proxy untuk aiohttp_socks."""
         schemes = ["http://", "https://", "socks4://", "socks5://"]
+        
+        # Jika proxy sudah memiliki skema
         if any(proxy.startswith(scheme) for scheme in schemes):
-            return proxy
-        return f"http://{proxy}"
+            try:
+                parts = proxy.split('@')
+                if len(parts) == 2:
+                    # Format dengan autentikasi: scheme://username:password@host:port
+                    auth, host_port = parts
+                    if ':' not in auth or ':' not in host_port:
+                        self.log(f"Format proxy tidak valid, harus ada username:password dan host:port: {proxy}", level="error")
+                        return None
+                    return proxy
+                elif len(parts) == 1 and ':' in proxy:
+                    # Format tanpa autentikasi: scheme://host:port
+                    return proxy
+                else:
+                    self.log(f"Format proxy tidak valid: {proxy}", level="error")
+                    return None
+            except Exception as e:
+                self.log(f"Gagal mem-validasi proxy {proxy}: {e}", level="error")
+                return None
+        
+        # Format tanpa skema: ip:port atau username:password@ip:port
+        try:
+            if proxy.count(':') == 1:
+                # Format ip:port, default ke HTTP
+                return f"http://{proxy}"
+            elif proxy.count(':') == 3 and '@' in proxy:
+                # Format username:password@ip:port, default ke HTTP
+                return f"http://{proxy}"
+            else:
+                self.log(f"Format proxy tidak valid: {proxy}", level="error")
+                return None
+        except Exception as e:
+            self.log(f"Gagal mem-parsing proxy {proxy}: {e}", level="error")
+            return None
 
     def get_next_proxy_for_account(self, email):
         if not self.proxies:
@@ -159,6 +205,9 @@ class PingVPN:
             return None
         if email not in self.account_proxies:
             proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
+            if proxy is None:
+                self.log(f"Proxy tidak valid untuk akun {email}. Menggunakan jaringan lokal.", level="warning")
+                return None
             self.account_proxies[email] = proxy
             self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
         return self.account_proxies[email]
@@ -168,6 +217,9 @@ class PingVPN:
             self.log(f"Tidak ada proxy untuk dirotasi untuk akun {email}. Menggunakan jaringan lokal.", level="warning")
             return None
         proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
+        if proxy is None:
+            self.log(f"Proxy tidak valid untuk akun {email}. Menggunakan jaringan lokal.", level="warning")
+            return None
         self.account_proxies[email] = proxy
         self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
         return proxy

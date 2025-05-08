@@ -2,4 +2,4 @@ aiohttp>=3.10.3
 aiohttp-socks>=0.9.1
 fake-useragent>=2.0.3
 colorama>=0.4.6
-pytz>=2022.1
+pytz>=2025.1

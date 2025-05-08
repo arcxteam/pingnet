@@ -10,16 +10,14 @@ from aiohttp_socks import ProxyConnector
 from fake_useragent import FakeUserAgent
 from colorama import Fore, Style, init
 
-# Initialize colorama for colored output
 init(autoreset=True)
 
-# Configure logging for PM2
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler('pingbot.log'),  # Log to file for PM2 monitoring
-        logging.StreamHandler()  # Also log to console
+        logging.FileHandler('pingbot.log'),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -44,15 +42,17 @@ class PingVPN:
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
-        self.max_concurrent_tasks = 10  # Limit concurrent tasks to prevent overload
+        self.account_points = {}  # Melacak poin per akun
+        self.account_connection_time = {}  # Melacak waktu koneksi
+        self.max_concurrent_tasks = 10  # Batas tugas bersamaan
 
     def clear_terminal(self):
         os.system('cls' if os.name == 'nt' else 'clear')
 
     def log(self, message, level="info"):
-        """Log messages with timestamp and level."""
         timestamp = datetime.now().astimezone(wib).strftime('%x %X %Z')
-        log_message = f"[ {timestamp} ] | {message}"
+        color = Fore.GREEN if level == "info" else Fore.RED if level == "error" else Fore.YELLOW
+        log_message = f"[ {timestamp} ] | {color}{message}{Style.RESET_ALL}"
         if level == "info":
             logger.info(log_message)
         elif level == "error":
@@ -61,12 +61,24 @@ class PingVPN:
             logger.warning(log_message)
 
     def welcome(self):
-        self.log(
-            f"{Fore.GREEN + Style.BRIGHT}Auto Ping {Fore.BLUE + Style.BRIGHT}PingVPN Network - BOT\n"
-            f"{Fore.GREEN + Style.BRIGHT}Rey? {Fore.YELLOW + Style.BRIGHT}<INI WATERMARK>",
-            level="info"
-        )
-
+        """Menampilkan banner kustom untuk PingVPN."""
+        banner = f"""
+    {Fore.GREEN}========================  WELCOME TO INTERACTIVE TESTNET ========================{Style.RESET_ALL}
+    {Fore.YELLOW}
+     ██████╗██╗   ██╗ █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ██████╗ ███████╗
+    ██╔════╝██║   ██║██╔══██╗████╗  ██║████╗  ██║██╔═══██╗██╔══██╗██╔════╝
+    ██║     ██║   ██║███████║██╔██╗ ██║██╔██╗ ██║██║   ██║██║  ██║█████╗  
+    ██║     ██║   ██║██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  
+    ╚██████╗╚██████╔╝██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝██████╔╝███████╗
+     ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝
+    {Style.RESET_ALL}
+    {Fore.CYAN}======================================================================={Style.RESET_ALL}
+    {Fore.MAGENTA}       Welcome to Onchain Testnet & Mainnet Interactive          {Style.RESET_ALL}
+    {Fore.YELLOW}        - CUANNODE By Greyscope&Co, Credit By Arcxteam -          {Style.RESET_ALL}
+    {Fore.CYAN}======================================================================={Style.RESET_ALL}
+    """
+        self.log(banner, level="info")
+    
     def format_seconds(self, seconds):
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -76,40 +88,64 @@ class PingVPN:
         filename = "accounts.json"
         try:
             if not os.path.exists(filename):
-                self.log(f"{Fore.RED}File {filename} Not Found.", level="error")
+                self.log(f"File {filename} tidak ditemukan.", level="error")
                 return []
             with open(filename, 'r') as file:
                 data = json.load(file)
                 if not isinstance(data, list):
-                    self.log(f"{Fore.RED}Invalid format in {filename}. Expected a list.", level="error")
+                    self.log(f"Format tidak valid di {filename}. Harus berupa daftar.", level="error")
                     return []
+                for account in data:
+                    if not all(key in account for key in ["Email", "UserId", "DeviceId"]):
+                        self.log(f"Akun tidak valid: {account}", level="error")
+                        return []
                 return data
         except json.JSONDecodeError as e:
-            self.log(f"{Fore.RED}Failed to parse {filename}: {e}", level="error")
+            self.log(f"Gagal mem-parsing {filename}: {e}", level="error")
             return []
 
     async def load_proxies(self):
-        """Load private proxies from proxy.txt."""
+        """Memuat proxy private dari proxy.txt."""
         filename = "proxy.txt"
         try:
             if not os.path.exists(filename):
-                self.log(f"{Fore.RED + Style.BRIGHT}File {filename} Not Found.", level="error")
+                self.log(f"File {filename} tidak ditemukan.", level="error")
                 return
             with open(filename, 'r') as f:
                 self.proxies = [line.strip() for line in f if line.strip()]
             
             if not self.proxies:
-                self.log(f"{Fore.RED + Style.BRIGHT}No Proxies Found in {filename}.", level="error")
+                self.log(f"Tidak ada proxy yang ditemukan di {filename}.", level="error")
                 return
 
+            # Validasi proxy
+            valid_proxies = []
+            for proxy in self.proxies:
+                if await self.test_proxy(proxy):
+                    valid_proxies.append(proxy)
+                else:
+                    self.log(f"Proxy tidak valid: {proxy}", level="warning")
+            self.proxies = valid_proxies
+
             self.log(
-                f"{Fore.GREEN + Style.BRIGHT}Proxies Total: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{len(self.proxies)}{Style.RESET_ALL}",
+                f"Total Proxy: {len(self.proxies)}",
                 level="info"
             )
         except Exception as e:
-            self.log(f"{Fore.RED + Style.BRIGHT}Failed To Load Proxies: {e}", level="error")
+            self.log(f"Gagal memuat proxy: {e}", level="error")
             self.proxies = []
+
+    async def test_proxy(self, proxy):
+        """Menguji apakah proxy berfungsi."""
+        test_url = "https://www.google.com"
+        connector = ProxyConnector.from_url(self.check_proxy_schemes(proxy))
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=10)) as session:
+                async with session.get(test_url) as response:
+                    response.raise_for_status()
+                    return True
+        except Exception:
+            return False
 
     def check_proxy_schemes(self, proxy):
         schemes = ["http://", "https://", "socks4://", "socks5://"]
@@ -119,7 +155,7 @@ class PingVPN:
 
     def get_next_proxy_for_account(self, email):
         if not self.proxies:
-            self.log(f"No proxies available for account {email}.", level="warning")
+            self.log(f"Tidak ada proxy tersedia untuk akun {email}. Menggunakan jaringan lokal.", level="warning")
             return None
         if email not in self.account_proxies:
             proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
@@ -129,7 +165,7 @@ class PingVPN:
 
     def rotate_proxy_for_account(self, email):
         if not self.proxies:
-            self.log(f"No proxies available to rotate for account {email}.", level="warning")
+            self.log(f"Tidak ada proxy untuk dirotasi untuk akun {email}. Menggunakan jaringan lokal.", level="warning")
             return None
         proxy = self.check_proxy_schemes(self.proxies[self.proxy_index])
         self.account_proxies[email] = proxy
@@ -143,19 +179,12 @@ class PingVPN:
             return f"{mask_account}@{domain}"
         return account[:3] + '*' * 3 + account[-3:] if len(account) > 6 else account
 
-    def print_message(self, account, proxy, color, message):
-        proxy_display = proxy or "No Proxy"
+    def print_message(self, account, proxy, message, status="info"):
+        proxy_display = proxy or "Jaringan Lokal"
+        color = Fore.GREEN if status == "info" else Fore.RED if status == "error" else Fore.YELLOW
         self.log(
-            f"{Fore.CYAN + Style.BRIGHT}[ Account: {Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT}{self.mask_account(account)}{Style.RESET_ALL}"
-            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-            f"{Fore.CYAN + Style.BRIGHT}Proxy: {Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT}{proxy_display}{Style.RESET_ALL}"
-            f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-            f"{Fore.CYAN + Style.BRIGHT}Status: {Style.RESET_ALL}"
-            f"{color + Style.BRIGHT}{message}{Style.RESET_ALL}"
-            f"{Fore.CYAN + Style.BRIGHT}]{Style.RESET_ALL}",
-            level="info"
+            f"[ Akun: {self.mask_account(account)} - Proxy: {proxy_display} - Status: {color}{message}{Style.RESET_ALL}]",
+            level=status
         )
 
     async def connect_vpn(self, email: str, device_id: str, proxy=None, retries=5):
@@ -185,12 +214,30 @@ class PingVPN:
                         return True
             except Exception as e:
                 if attempt < retries - 1:
-                    delay = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                    self.log(f"Retrying VPN connection for {email} after {delay}s: {str(e)}", level="warning")
+                    delay = 2 ** attempt  # Backoff eksponensial
+                    self.log(f"Mencoba ulang koneksi VPN untuk {email} setelah {delay}s: {str(e)}", level="warning")
                     await asyncio.sleep(delay)
                     continue
-                self.print_message(email, proxy, Fore.RED, f"Connect VPN Failed: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+                self.print_message(email, proxy, f"Koneksi VPN gagal: {str(e)}", status="error")
                 return False
+
+    async def track_points(self, email):
+        """Melacak dan mencatat poin setiap 10 menit."""
+        self.account_points[email] = self.account_points.get(email, 0)
+        self.account_connection_time[email] = self.account_connection_time.get(email, time.time())
+        
+        while True:
+            await asyncio.sleep(600)  # 10 menit
+            if email in self.account_connection_time:
+                elapsed = time.time() - self.account_connection_time[email]
+                if elapsed >= 600:  # Pastikan koneksi aktif selama 10 menit
+                    self.account_points[email] += 1
+                    self.print_message(
+                        email, 
+                        self.account_proxies.get(email), 
+                        f"Total Poin Akumulatif: {self.account_points[email]} PTS",
+                        status="info"
+                    )
 
     async def connect_websocket(self, email: str, user_id: str, device_id: str, use_proxy: bool):
         wss_url = f"{self.WSS_API}/clients/{user_id}/events"
@@ -218,7 +265,9 @@ class PingVPN:
                     if not connected:
                         is_connected = await self.process_connect_vpn(email, device_id, use_proxy)
                         if is_connected:
-                            self.print_message(email, proxy, Fore.GREEN, "VPN Connected")
+                            self.print_message(email, proxy, "VPN Terhubung", status="info")
+                            self.account_connection_time[email] = time.time()  # Mulai pelacakan waktu
+                            asyncio.create_task(self.track_points(email))  # Mulai pelacakan poin
                             connected = True
 
                     while connected:
@@ -227,61 +276,69 @@ class PingVPN:
                             if response.get("type") == "client_points":
                                 client_points = response.get("data", {}).get("amount", 0)
                                 last_transaction_id = response.get("data", {}).get("last_transaction_id", "N/A")
+                                self.account_points[email] = self.account_points.get(email, 0) + client_points
                                 self.print_message(
-                                    email, proxy, Fore.GREEN, 
-                                    f"Client Earning {Fore.WHITE + Style.BRIGHT}{client_points} PTS{Style.RESET_ALL} "
-                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL} "
-                                    f"{Fore.CYAN + Style.BRIGHT}Transaction Id: {Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT}{last_transaction_id}{Style.RESET_ALL}"
+                                    email, proxy, 
+                                    f"Pendapatan Klien: {client_points} PTS - ID Transaksi: {last_transaction_id}",
+                                    status="info"
                                 )
                             elif response.get("type") == "referral_points":
                                 referral_points = response.get("data", {}).get("amount", 0)
                                 last_transaction_id = response.get("data", {}).get("last_transaction_id", "N/A")
+                                self.account_points[email] = self.account_points.get(email, 0) + referral_points
                                 self.print_message(
-                                    email, proxy, Fore.GREEN, 
-                                    f"Referral Earning {Fore.WHITE + Style.BRIGHT}{referral_points} PTS{Style.RESET_ALL} "
-                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL} "
-                                    f"{Fore.CYAN + Style.BRIGHT}Transaction Id: {Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT}{last_transaction_id}{Style.RESET_ALL}"
+                                    email, proxy, 
+                                    f"Pendapatan Referal: {referral_points} PTS - ID Transaksi: {last_transaction_id}",
+                                    status="info"
                                 )
                         except Exception as e:
-                            self.print_message(email, proxy, Fore.YELLOW, f"Websocket Connection Closed: {Fore.RED + Style.BRIGHT}{str(e)}")
+                            self.print_message(email, proxy, f"Koneksi WebSocket terputus: {str(e)}", status="warning")
                             await asyncio.sleep(5)
                             connected = False
                             break
             except Exception as e:
-                self.print_message(email, proxy, Fore.RED, f"Websocket Not Connected: {Fore.YELLOW + Style.BRIGHT}{str(e)}")
+                self.print_message(email, proxy, f"WebSocket tidak terhubung: {str(e)}", status="error")
                 await asyncio.sleep(5)
             finally:
                 await session.close()
 
     async def process_connect_vpn(self, email: str, device_id: str, use_proxy: bool):
         proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-        connect = None
         max_attempts = 3
 
         for attempt in range(max_attempts):
+            if proxy and not await self.test_proxy(proxy):
+                self.log(f"Proxy {proxy} tidak berfungsi untuk {email}.", level="warning")
+                proxy = self.rotate_proxy_for_account(email)
+                if not proxy and attempt == max_attempts - 1:
+                    self.log(f"Tidak ada proxy yang berfungsi untuk {email}. Beralih ke jaringan lokal.", level="warning")
+                    proxy = None
+                continue
             connect = await self.connect_vpn(email, device_id, proxy)
             if connect:
                 return True
             await asyncio.sleep(5)
             proxy = self.rotate_proxy_for_account(email) if use_proxy else None
-        self.log(f"Failed to connect VPN for {email} after {max_attempts} attempts.", level="error")
+            if not proxy and attempt == max_attempts - 1:
+                self.log(f"Tidak ada proxy yang berfungsi untuk {email}. Beralih ke jaringan lokal.", level="warning")
+                connect = await self.connect_vpn(email, device_id, None)
+                if connect:
+                    return True
+        self.log(f"Gagal menghubungkan VPN untuk {email} setelah {max_attempts} percobaan.", level="error")
         return False
 
     async def main(self):
         try:
             accounts = self.load_accounts()
             if not accounts:
-                self.log(f"{Fore.RED + Style.BRIGHT}No Accounts Loaded.", level="error")
+                self.log("Tidak ada akun yang dimuat.", level="error")
                 return
 
-            use_proxy = True  # Hardcode to use private proxies (equivalent to option 2)
+            use_proxy = True  # Menggunakan proxy private
             self.clear_terminal()
             self.welcome()
             self.log(
-                f"{Fore.GREEN + Style.BRIGHT}Account's Total: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}",
+                f"Total Akun: {len(accounts)}",
                 level="info"
             )
 
@@ -289,30 +346,29 @@ class PingVPN:
                 await self.load_proxies()
 
             if not self.proxies and use_proxy:
-                self.log(f"{Fore.RED + Style.BRIGHT}No proxies available. Exiting.", level="error")
-                return
+                self.log("Tidak ada proxy yang tersedia. Menggunakan jaringan lokal.", level="warning")
+                use_proxy = False
 
-            self.log(f"{Fore.CYAN + Style.BRIGHT}-" * 75, level="info")
+            self.log("-" * 75, level="info")
 
-            # Process accounts in batches to avoid overwhelming the system
+            # Proses akun dalam batch
             for i in range(0, len(accounts), self.max_concurrent_tasks):
                 batch = accounts[i:i + self.max_concurrent_tasks]
                 tasks = []
                 for account in batch:
-                    if account:
-                        email = account.get("Email")
-                        user_id = account.get("UserId")
-                        device_id = account.get("DeviceId")
-                        if not all([email, user_id, device_id]):
-                            self.log(f"Invalid account data: {account}", level="error")
-                            continue
-                        tasks.append(self.connect_websocket(email, user_id, device_id, use_proxy))
+                    email = account.get("Email")
+                    user_id = account.get("UserId")
+                    device_id = account.get("DeviceId")
+                    if not all([email, user_id, device_id]):
+                        self.log(f"Data akun tidak valid: {account}", level="error")
+                        continue
+                    tasks.append(self.connect_websocket(email, user_id, device_id, use_proxy))
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
-                await asyncio.sleep(10)  # Delay between batches
+                await asyncio.sleep(10)
 
         except Exception as e:
-            self.log(f"{Fore.RED + Style.BRIGHT}Error in main: {e}", level="error")
+            self.log(f"Error di main: {e}", level="error")
             raise
 
 if __name__ == "__main__":
@@ -321,6 +377,6 @@ if __name__ == "__main__":
         asyncio.run(bot.main())
     except KeyboardInterrupt:
         logger.info(f"[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ] | "
-                    f"{Fore.RED + Style.BRIGHT}[ EXIT ] PingVPN Network - BOT{Style.RESET_ALL}")
+                    f"{Fore.RED}[ EXIT ] Ping Network - BOT{Style.RESET_ALL}")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"Error tak terduga: {e}")

@@ -5,34 +5,35 @@ const UserAgent = require('user-agents');
 const fs = require('fs');
 const path = require('path');
 const HttpsProxyAgent = require('https-proxy-agent');
-const Fore = require('colors');
+const colors = require('colors/safe'); // Changed to colors/safe
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
-// Enhanced logger with account number support
+// Enhanced logger
 const createLogger = (accountNum = '') => ({
-  info: (msg) => console.log(`${Fore.green} ✓ ${accountNum} ${msg}${Fore.reset}`),
-  warn: (msg) => console.log(`${Fore.yellow} ⚠️ ${accountNum} ${msg}${Fore.reset}`),
-  error: (msg) => console.log(`${Fore.red} ✗ ${accountNum} ${msg}${Fore.reset}`),
-  success: (msg) => console.log(`${Fore.green} ✅ ${accountNum} ${msg}${Fore.reset}`),
-  loading: (msg) => console.log(`${Fore.cyan} ⟳ ${accountNum} ${msg}${Fore.reset}`),
-  step: (msg) => console.log(`${Fore.white} ➤ ${accountNum} ${msg}${Fore.reset}`),
-  countdown: (msg) => process.stdout.write(`\r${Fore.blue}[⏰]${accountNum} ${msg}${Fore.reset}`)
+  info: (msg) => console.log(colors.green(` ✓ ${accountNum} ${msg}`)),
+  warn: (msg) => console.log(colors.yellow(` ⚠️ ${accountNum} ${msg}`)),
+  error: (msg) => console.log(colors.red(` ✗ ${accountNum} ${msg}`)),
+  success: (msg) => console.log(colors.green(` ✅ ${accountNum} ${msg}`)),
+  loading: (msg) => console.log(colors.cyan(` ⟳ ${accountNum} ${msg}`)),
+  step: (msg) => console.log(colors.white(` ➤ ${accountNum} ${msg}`)),
+  countdown: (msg) => process.stdout.write(`\r${colors.blue(`[⏰]${accountNum} ${msg}`)}`)
 });
 
+// Banner
 const showBanner = () => {
-  console.log(`${Fore.GREEN}============================ WELCOME TO DAPPs ============================${Fore.RESET}`);
-  console.log(`${Fore.YELLOW}
+  console.log(colors.green('============================ WELCOME TO DAPPs ============================'));
+  console.log(colors.yellow(`
  ██████╗██╗   ██╗ █████╗ ███╗   ██╗███╗   ██╗ ██████╗ ██████╗ ███████╗
 ██╔════╝██║   ██║██╔══██╗████╗  ██║████╗  ██║██╔═══██╗██╔══██╗██╔════╝
 ██║     ██║   ██║███████║██╔██╗ ██║██╔██╗ ██║██║   ██║██║  ██║█████╗  
 ██║     ██║   ██║██╔══██║██║╚██╗██║██║╚██╗██║██║   ██║██║  ██║██╔══╝  
 ╚██████╗╚██████╔╝██║  ██║██║ ╚████║██║ ╚████║╚██████╔╝██████╔╝███████╗
  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═══╝ ╚═════╝ ╚═════╝ ╚══════╝
-${Fore.RESET}`);
-  console.log(`${Fore.CYAN}=========================================================================${Fore.RESET}`);
-  console.log(`${Fore.MAGENTA}       Welcome to Greyscope&Co Onchain Testnet & Mainnet Interactive   ${Fore.RESET}`);
-  console.log(`${Fore.YELLOW}           - CUANNODE By Greyscope&Co, Credit By Arcxteam -     ${Fore.RESET}`);
-  console.log(`${Fore.CYAN}=========================================================================${Fore.RESET}`);
+`));
+  console.log(colors.cyan('========================================================================='));
+  console.log(colors.magenta('       Welcome to Greyscope&Co Onchain Testnet & Mainnet Interactive'));
+  console.log(colors.yellow('           - CUANNODE By Greyscope&Co, Credit By Arcxteam -'));
+  console.log(colors.cyan('========================================================================='));
 };
 
 // Load accounts from .env with USER_ID_1, DEVICE_ID_1 format
@@ -50,7 +51,6 @@ const loadAccounts = () => {
   }
 
   if (accounts.length === 0) {
-    // Fallback to old format if no numbered accounts found
     if (process.env.USER_ID) {
       accounts.push({
         number: 1,
@@ -66,7 +66,6 @@ const loadAccounts = () => {
 // Load proxies from proxy.txt (one per line)
 const loadProxies = () => {
   if (!fs.existsSync('proxy.txt')) return [];
-  
   return fs.readFileSync('proxy.txt', 'utf8')
     .split('\n')
     .filter(line => line.trim() !== '')
@@ -75,6 +74,7 @@ const loadProxies = () => {
 
 const getRandomZoneId = () => Math.floor(Math.random() * 6).toString();
 
+// Create config - UNCHANGED except colors
 const createConfig = (account, proxy) => {
   const userAgent = new UserAgent({ deviceCategory: 'desktop' });
   const UA_STRING = userAgent.toString();
@@ -274,5 +274,5 @@ async function startBot() {
 }
 
 startBot().catch(error => {
-  console.log(`${Fore.RED}Error: ${error.message}${Fore.RESET}`);
+  console.log(colors.red(`Error: ${error.message}`));
 });

@@ -5,21 +5,28 @@ const UserAgent = require('user-agents');
 const fs = require('fs');
 const path = require('path');
 const HttpsProxyAgent = require('https-proxy-agent');
-const colors = require('colors/safe'); // Changed to colors/safe
+const colors = require('colors/safe');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
-// Enhanced logger
+// Timestamp function
+const getTimestamp = () => {
+  const now = new Date();
+  const pad = num => num.toString().padStart(2, '0');
+  return `[${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
+};
+
+// Enhanced logger with timestamp
 const createLogger = (accountNum = '') => ({
-  info: (msg) => console.log(colors.green(` ✓ ${accountNum} ${msg}`)),
-  warn: (msg) => console.log(colors.yellow(` ⚠️ ${accountNum} ${msg}`)),
-  error: (msg) => console.log(colors.red(` ✗ ${accountNum} ${msg}`)),
-  success: (msg) => console.log(colors.green(` ✅ ${accountNum} ${msg}`)),
-  loading: (msg) => console.log(colors.cyan(` ⟳ ${accountNum} ${msg}`)),
-  step: (msg) => console.log(colors.white(` ➤ ${accountNum} ${msg}`)),
-  countdown: (msg) => process.stdout.write(`\r${colors.blue(`[⏰]${accountNum} ${msg}`)}`)
+  info: (msg) => console.log(`${getTimestamp()} ${colors.green(`✓ ${accountNum} ${msg}`)}`),
+  warn: (msg) => console.log(`${getTimestamp()} ${colors.yellow(`⚠️ ${accountNum} ${msg}`)}`),
+  error: (msg) => console.log(`${getTimestamp()} ${colors.red(`✗ ${accountNum} ${msg}`)}`),
+  success: (msg) => console.log(`${getTimestamp()} ${colors.green(`✅ ${accountNum} ${msg}`)}`),
+  loading: (msg) => console.log(`${getTimestamp()} ${colors.cyan(`⟳ ${accountNum} ${msg}`)}`),
+  step: (msg) => console.log(`${getTimestamp()} ${colors.white(`➤ ${accountNum} ${msg}`)}`),
+  countdown: (msg) => process.stdout.write(`\r${getTimestamp()} ${colors.blue(`[⏰]${accountNum} ${msg}`)}`)
 });
 
-// Banner
+// Banner (unchanged)
 const showBanner = () => {
   console.log(colors.green('============================ WELCOME TO DAPPs ============================'));
   console.log(colors.yellow(`
@@ -36,7 +43,7 @@ const showBanner = () => {
   console.log(colors.cyan('========================================================================='));
 };
 
-// Load accounts from .env with USER_ID_1, DEVICE_ID_1 format
+// Load accounts (unchanged)
 const loadAccounts = () => {
   const accounts = [];
   let i = 1;
@@ -50,20 +57,18 @@ const loadAccounts = () => {
     i++;
   }
 
-  if (accounts.length === 0) {
-    if (process.env.USER_ID) {
-      accounts.push({
-        number: 1,
-        userId: process.env.USER_ID,
-        deviceId: process.env.DEVICE_ID || uuidv4()
-      });
-    }
+  if (accounts.length === 0 && process.env.USER_ID) {
+    accounts.push({
+      number: 1,
+      userId: process.env.USER_ID,
+      deviceId: process.env.DEVICE_ID || uuidv4()
+    });
   }
 
   return accounts;
 };
 
-// Load proxies from proxy.txt (one per line)
+// Load proxies (unchanged)
 const loadProxies = () => {
   if (!fs.existsSync('proxy.txt')) return [];
   return fs.readFileSync('proxy.txt', 'utf8')
@@ -74,7 +79,7 @@ const loadProxies = () => {
 
 const getRandomZoneId = () => Math.floor(Math.random() * 6).toString();
 
-// Create config - UNCHANGED except colors
+// Create config with proper headers and fallback
 const createConfig = (account, proxy) => {
   const userAgent = new UserAgent({ deviceCategory: 'desktop' });
   const UA_STRING = userAgent.toString();
@@ -135,11 +140,13 @@ function connectWebSocket(config) {
   const baseReconnectDelay = 7000;
   let isAlive = false;
   let currentWsUrl = config.wsUrl;
+  let isUsingFallback = false;
+  let connectionTimeout;
 
   const wsOptions = { 
     headers: {
-      'accept-language': 'en-US,en;q=0.9,id;q=0.8',
-      'user-agent': config.headers['user-agent']
+      ...config.headers,
+      'accept-language': 'en-US,en;q=0.9,id;q=0.8'
     }
   };
 
@@ -149,11 +156,25 @@ function connectWebSocket(config) {
   }
 
   function establishConnection() {
+    clearTimeout(connectionTimeout);
+    
     log.loading(`Establishing WebSocket connection to ${currentWsUrl}...`);
+    
+    connectionTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        log.error('Connection timeout reached');
+        ws.close();
+      }
+    }, 15000);
+
     ws = new WebSocket(currentWsUrl, wsOptions);
 
     ws.on('open', () => {
+      clearTimeout(connectionTimeout);
       log.success(`WebSocket connected to ${currentWsUrl}`);
+      if (isUsingFallback) {
+        log.warn('⚠️ Currently using FALLBACK WebSocket server');
+      }
       reconnectAttempts = 0;
       isAlive = true;
       sendAnalyticsEvent(config);
@@ -162,12 +183,16 @@ function connectWebSocket(config) {
     ws.on('message', (data) => {
       try {
         const message = JSON.parse(data);
-        log.info(`Received message: ${JSON.stringify(message)}`);
         isAlive = true;
+        
         if (message.type === 'client_points') {
           log.success(`Points updated: ${message.data.amount} (Transaction ID: ${message.data.last_transaction_id})`);
         } else if (message.type === 'referral_points') {
           log.success(`Referral points updated: ${message.data.amount} (Transaction ID: ${message.data.last_transaction_id})`);
+        } else if (message.type === 'pong') {
+          // Silently handle pong responses
+        } else {
+          log.info(`Received message: ${JSON.stringify(message)}`);
         }
       } catch (error) {
         log.error(`Error parsing WebSocket message: ${error.message}`);
@@ -175,18 +200,21 @@ function connectWebSocket(config) {
     });
 
     ws.on('close', () => {
+      clearTimeout(connectionTimeout);
       log.warn('WebSocket disconnected');
       isAlive = false;
       attemptReconnect();
     });
 
     ws.on('error', (error) => {
+      clearTimeout(connectionTimeout);
       log.error(`WebSocket error: ${error.message}`);
       isAlive = false;
       
-      if (currentWsUrl === config.wsUrl && config.fallbackWsUrl) {
-        log.warn(`Trying fallback WebSocket URL: ${config.fallbackWsUrl}`);
+      if (!isUsingFallback && config.fallbackWsUrl) {
+        log.warn(`🔄 Switching to fallback WebSocket URL`);
         currentWsUrl = config.fallbackWsUrl;
+        isUsingFallback = true;
         setTimeout(establishConnection, 1000);
       } else {
         attemptReconnect();
@@ -194,21 +222,11 @@ function connectWebSocket(config) {
     });
   }
 
-  function sendPing() {
+  const pingInterval = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'ping' }));
-      log.step('Sent ping to server');
     }
-  }
-
-  const pingInterval = setInterval(() => {
-    if (!isAlive && ws && ws.readyState !== WebSocket.CLOSED) {
-      log.warn('No messages received, closing connection...');
-      ws.close();
-    } else {
-      sendPing();
-    }
-  }, 60000);
+  }, 30000);
 
   function attemptReconnect() {
     if (reconnectAttempts >= maxReconnectAttempts) {
@@ -217,7 +235,7 @@ function connectWebSocket(config) {
       return;
     }
 
-    const delay = baseReconnectDelay * Math.pow(2, reconnectAttempts);
+    const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 60000);
     log.warn(`Reconnecting in ${delay / 1000} seconds... (Attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
 
     setTimeout(() => {
@@ -243,7 +261,7 @@ async function startBot() {
   const proxies = loadProxies();
   
   if (accounts.length === 0) {
-    console.log(`${Fore.RED}No accounts found in .env${Fore.RESET}`);
+    console.log(colors.red('No accounts found in .env'));
     return;
   }
 
@@ -260,7 +278,6 @@ async function startBot() {
     
     connections.push(connectWebSocket(config));
     
-    // Add delay between account initializations
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
 
